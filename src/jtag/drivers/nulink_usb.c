@@ -33,6 +33,15 @@
 
 #define NULINK2_USB_PID1  (0x5200)
 #define NULINK2_USB_PID2  (0x5201)
+#define NULINK2_USB_PID3  (0x5202)
+#define NULINK2_USB_PID4  (0x5203)
+#define NULINK2_USB_PID5  (0x5204)
+#define NULINK2_USB_PID6  (0x5205)
+#define NULINK2_USB_PID7  (0x2004)
+#define NULINK2_USB_PID8  (0x2005)
+#define NULINK2_USB_PID9  (0x2006)
+#define NULINK2_USB_PID10  (0x2007)
+#define NULINK2_USB_PID11  (0x2008)
 
 struct nulink_usb_handle_s {
 	hid_device *dev_handle;
@@ -1108,6 +1117,15 @@ static int nulink_usb_open(struct hl_interface_param_s *param, void **fd)
 	switch (target_pid) {
 	case NULINK2_USB_PID1:
 	case NULINK2_USB_PID2:
+	case NULINK2_USB_PID3:
+	case NULINK2_USB_PID4:
+	case NULINK2_USB_PID5:
+	case NULINK2_USB_PID6:
+	case NULINK2_USB_PID7:
+	case NULINK2_USB_PID8:
+	case NULINK2_USB_PID9:
+	case NULINK2_USB_PID10:
+	case NULINK2_USB_PID11:
 		h->hardware_config = HARDWARE_CONFIG_NULINK2;
 		h->max_packet_size = NULINK2_HID_MAX_SIZE;
 		h->init_buffer = nulink2_usb_init_buffer;
