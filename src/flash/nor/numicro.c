@@ -790,16 +790,40 @@ static const uint8_t numicro_m4_flash_write_code[] = {
 #include "../../../contrib/loaders/flash/numicro/numicro_m4.inc"
 };
 
+static const uint32_t numicro_M460_flash_algorithm_code[] = {
+    0xE00ABE00, 0x4770ba40, 0x4770bac0, 0x4603b510, 0x4c802059, 0xf04f6020, 0xf04f0016, 0xf8c44480, 
+	0xf04f0100, 0xf8c40088, 0xf04f0100, 0xf8d04080, 0x28010100, 0x2001d001, 0x4877bd10, 0xf0406800, 
+	0xf04f0004, 0xf8c44480, 0x46200200, 0x0204f8d0, 0x0004f040, 0x0204f8c4, 0x68004870, 0x0029f040, 
+	0x60204c6e, 0x68004620, 0x0029f000, 0xd0012829, 0xe7e12001, 0xe7df2000, 0xbf004601, 0x68004868, 
+	0x0f01f010, 0x4865d1fa, 0xf0206800, 0x4a630001, 0x20006010, 0xb5304770, 0x460c4603, 0x4860bf00, 
+	0xf0106800, 0xd1fa0f01, 0x6800485c, 0x0040f040, 0x60284d5a, 0x60444628, 0x60c36082, 0x61282001, 
+	0x8f6ff3bf, 0x4856bf00, 0xf0106800, 0xd1fa0f01, 0x68014852, 0x0f40f011, 0x6001d002, 0xbd302001, 
+	0xe7fc2000, 0x4604b530, 0xf36f2500, 0xf404040b, 0xf1b00070, 0xd1026f72, 0x6472f1a4, 0x462a4d49, 
+	0x20224621, 0xffc7f7ff, 0xb570bd30, 0x460d4604, 0xe0082600, 0x1c764631, 0x0021f854, 0xffe2f7ff, 
+	0x2001b108, 0x42aebd70, 0x2000d3f4, 0xb530e7fa, 0xf0134603, 0xd0010f03, 0xbd302001, 0xf0201cc8, 
+	0xbf000103, 0x68004836, 0x0f01f010, 0x4833d1fa, 0xf0406800, 0x4d310040, 0x20216028, 0xe01960e8, 
+	0x6043482e, 0x68104d2d, 0x200160a8, 0xf3bf6128, 0xbf008f6f, 0x6800482a, 0x0f01f010, 0x4827d1fa, 
+	0xf0146804, 0xd0020f40, 0x20016004, 0x1d1be7d5, 0x1f091d12, 0xd1e32900, 0xe7ce2000, 0x4603b530, 
+	0x0f03f013, 0x2001d001, 0x1cc8bd30, 0x0103f020, 0x481bbf00, 0xf0106800, 0xd1fa0f01, 0x68004817, 
+	0x0040f040, 0x60284d15, 0x60e82000, 0x4813e01c, 0x20016043, 0x61284d11, 0x8f6ff3bf, 0x4810bf00, 
+	0xf0106800, 0xd1fa0f01, 0x6804480c, 0x0f40f014, 0x6004d001, 0x4809e00a, 0x68106884, 0xd00042a0, 
+	0x1d1be004, 0x1f091d12, 0xd1e02900, 0x4618bf00, 0x0000e7ca, 0x40000100, 0x40000200, 0x4000c000, 
+	0x4000c0c0, 0x0055aa03, 0x00000000
+};
+
 /* Program LongWord Block Write */
 static int numicro_writeblock(struct flash_bank *bank, const uint8_t *buffer,
 		uint32_t offset, uint32_t count)
 {
 	struct target *target = bank->target;
+	struct numicro_flash_bank *numicro_info = bank->driver_priv;
 	uint32_t buffer_size = 1024; /* Default minimum value */
 	struct working_area *write_algorithm;
 	struct working_area *source;
+	struct working_area *source2;
+	uint32_t totalCount = count;
 	uint32_t address = bank->base + offset;
-	struct reg_param reg_params[3];
+	struct reg_param reg_params[6];
 	struct armv7m_algorithm armv7m_info;
 	int retval = ERROR_OK;
 
@@ -837,23 +861,55 @@ static int numicro_writeblock(struct flash_bank *bank, const uint8_t *buffer,
 		if (retval != ERROR_OK)
 			return retval;
 	} else { /* for M4 */
-		/* allocate working area with flash programming code */
-		if (target_alloc_working_area(target, sizeof(numicro_m4_flash_write_code),
-			&write_algorithm) != ERROR_OK) {
-			LOG_WARNING("no working area available, can't do block memory writes");
-			return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+		if (numicro_info->cpu->series == NUMICRO_SERIES_M460) {
+			if (target_alloc_working_area(target, sizeof(numicro_M460_flash_algorithm_code),
+				&write_algorithm) != ERROR_OK) {
+				LOG_WARNING("no working area available, can't do block memory writes");
+				return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+			}
+
+			retval = target_write_buffer(target, write_algorithm->address,
+				sizeof(numicro_M460_flash_algorithm_code), (const uint8_t *)numicro_M460_flash_algorithm_code);
+			if (retval != ERROR_OK)
+				return retval;
+
+			buffer_size = 1024;
+		} else {
+			/* allocate working area with flash programming code */
+			if (target_alloc_working_area(target, sizeof(numicro_m4_flash_write_code),
+				&write_algorithm) != ERROR_OK) {
+				LOG_WARNING("no working area available, can't do block memory writes");
+				return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+			}
+
+			retval = target_write_buffer(target, write_algorithm->address,
+				sizeof(numicro_m4_flash_write_code), numicro_m4_flash_write_code);
+			if (retval != ERROR_OK)
+				return retval;
+
+			buffer_size = m_page_size;
 		}
+	}
 
-		retval = target_write_buffer(target, write_algorithm->address,
-			sizeof(numicro_m4_flash_write_code), numicro_m4_flash_write_code);
-		if (retval != ERROR_OK)
-			return retval;
+	/* Increase buffer_size if needed */
+	if (buffer_size == 1024 /*&& buffer_size < ((target->working_area_size - write_algorithm->size)/2)*/) {
+		buffer_size = (target->working_area_size - write_algorithm->size - 512) / 2; /* 512 bytes for stack */
 
-		buffer_size = m_page_size;
+		if (buffer_size & 0x1)
+			buffer_size = buffer_size - 1;
+
+		/* buffer for alignment */
+		if (buffer_size >= 128) {
+			buffer_size = buffer_size / 128 * 128;
+		}
+		else {
+			buffer_size = buffer_size - 10;
+		}
 	}
 
 	/* memory buffer */
-	while (target_alloc_working_area(target, buffer_size, &source) != ERROR_OK) {
+	while ((target_alloc_working_area(target, buffer_size, &source) != ERROR_OK) ||
+	       (target_alloc_working_area(target, buffer_size, &source2) != ERROR_OK)) {
 		buffer_size /= 4;
 		if (buffer_size <= 256) {
 			/* free working area, write algorithm already allocated */
@@ -867,42 +923,134 @@ static int numicro_writeblock(struct flash_bank *bank, const uint8_t *buffer,
 	armv7m_info.common_magic = ARMV7M_COMMON_MAGIC;
 	armv7m_info.core_mode = ARM_MODE_THREAD;
 
-	init_reg_param(&reg_params[0], "r0", 32, PARAM_IN_OUT); /* *pLW (*buffer) */
-	init_reg_param(&reg_params[1], "r1", 32, PARAM_OUT);    /* faddr */
-	init_reg_param(&reg_params[2], "r2", 32, PARAM_OUT);    /* number of words to program */
+	if (numicro_info->cpu->series == NUMICRO_SERIES_M460) {
+		// ProgramPage
+		uint32_t algorithm_programPage_entry_offset = 0x12F;
+		uint32_t algorithm_lr = 0x20000001;
+		uint32_t thisrun_count = 0;
 
-	/* write code buffer and use Flash programming code within NuMicro     */
-	/* Set breakpoint to 0 with time-out of 1000 ms                        */
-	while (count > 0) {
-		uint32_t thisrun_count = (count > (buffer_size / 4)) ? (buffer_size / 4) : count;
+		init_reg_param(&reg_params[0], "r0", 32, PARAM_OUT);
+		init_reg_param(&reg_params[1], "r1", 32, PARAM_OUT);
+		init_reg_param(&reg_params[2], "r2", 32, PARAM_OUT);
+		init_reg_param(&reg_params[3], "r9", 32, PARAM_OUT);
+		init_reg_param(&reg_params[4], "sp", 32, PARAM_OUT);    /* update SP */
+		init_reg_param(&reg_params[5], "lr", 32, PARAM_OUT);    /* update LR */
 
-		retval = target_write_buffer(target, source->address, thisrun_count * 4, buffer);
-		if (retval != ERROR_OK)
-			break;
+		/* write code buffer and use flash programming code within numicro */
+		/* set breakpoint to 0 with time-out of 10000 ms                  */
+		while (count > 0) {
+			if (count == totalCount) {
+				thisrun_count = (count > (buffer_size / 4)) ? (buffer_size / 4) : count;
 
-		buf_set_u32(reg_params[0].value, 0, 32, source->address);
-		buf_set_u32(reg_params[1].value, 0, 32, address);
-		buf_set_u32(reg_params[2].value, 0, 32, thisrun_count);
+				retval = target_write_buffer(target, source->address, thisrun_count * 4, buffer);
+				if (retval != ERROR_OK)
+					break;
+			}
 
-		retval = target_run_algorithm(target, 0, NULL, 3, reg_params,
-				write_algorithm->address, 0, 100000, &armv7m_info);
-		if (retval != ERROR_OK) {
-			LOG_ERROR("Error executing NuMicro Flash programming algorithm");
-			retval = ERROR_FLASH_OPERATION_FAILED;
-			break;
+			buf_set_u32(reg_params[0].value, 0, 32, address);
+			buf_set_u32(reg_params[1].value, 0, 32, thisrun_count * 4);
+			buf_set_u32(reg_params[2].value, 0, 32, source->address);
+			buf_set_u32(reg_params[3].value, 0, 32, 0x20000228);
+			buf_set_u32(reg_params[4].value, 0, 32, write_algorithm->address + target->working_area_size);
+			buf_set_u32(reg_params[5].value, 0, 32, algorithm_lr);
+
+			retval = target_start_algorithm(target, 0, NULL, 6, reg_params,
+				write_algorithm->address + algorithm_programPage_entry_offset, 0, &armv7m_info);
+
+			buffer  += thisrun_count * 4;
+			address += thisrun_count * 4;
+			count   -= thisrun_count;
+			LOG_INFO("Have written %d%%", (totalCount - count) * 100 / totalCount);
+
+			thisrun_count = (count > (buffer_size / 4)) ? (buffer_size / 4) : count;
+
+			if (thisrun_count > 0) {
+				retval = target_write_buffer(target, source2->address, thisrun_count * 4, buffer);
+				if (retval != ERROR_OK)
+					break;
+			}
+
+			retval = target_wait_algorithm(target, 0, NULL, 6, reg_params,
+				0, 10000, &armv7m_info);
+
+			if (thisrun_count == 0)
+				break;
+
+			buf_set_u32(reg_params[0].value, 0, 32, address);
+			buf_set_u32(reg_params[1].value, 0, 32, thisrun_count * 4);
+			buf_set_u32(reg_params[2].value, 0, 32, source2->address);
+			buf_set_u32(reg_params[3].value, 0, 32, 0x20000228);
+			buf_set_u32(reg_params[4].value, 0, 32, write_algorithm->address + target->working_area_size);
+			buf_set_u32(reg_params[5].value, 0, 32, algorithm_lr);
+
+			retval = target_start_algorithm(target, 0, NULL, 6, reg_params,
+				write_algorithm->address + algorithm_programPage_entry_offset, 0, &armv7m_info);
+
+			buffer  += thisrun_count * 4;
+			address += thisrun_count * 4;
+			count   -= thisrun_count;
+			LOG_INFO("Have written %d%%", (totalCount - count) * 100 / totalCount);
+
+			if (count != 0) {
+				thisrun_count = (count > (buffer_size / 4)) ? (buffer_size / 4) : count;
+
+				retval = target_write_buffer(target, source->address, thisrun_count * 4, buffer);
+				if (retval != ERROR_OK)
+					break;
+			}
+
+			retval = target_wait_algorithm(target, 0, NULL, 6, reg_params,
+				0, 10000, &armv7m_info);
 		}
 
-		buffer  += thisrun_count * 4;
-		address += thisrun_count * 4;
-		count   -= thisrun_count;
+		target_free_working_area(target, source);
+		target_free_working_area(target, source2);
+		target_free_working_area(target, write_algorithm);
+		destroy_reg_param(&reg_params[0]);
+		destroy_reg_param(&reg_params[1]);
+		destroy_reg_param(&reg_params[2]);
+		destroy_reg_param(&reg_params[3]);
+		destroy_reg_param(&reg_params[4]);
+		destroy_reg_param(&reg_params[5]);
+	} else {
+		init_reg_param(&reg_params[0], "r0", 32, PARAM_IN_OUT); /* *pLW (*buffer) */
+		init_reg_param(&reg_params[1], "r1", 32, PARAM_OUT);    /* faddr */
+		init_reg_param(&reg_params[2], "r2", 32, PARAM_OUT);    /* number of words to program */
+
+		/* write code buffer and use Flash programming code within NuMicro     */
+		/* Set breakpoint to 0 with time-out of 1000 ms                        */
+		while (count > 0) {
+			uint32_t thisrun_count = (count > (buffer_size / 4)) ? (buffer_size / 4) : count;
+
+			retval = target_write_buffer(target, source->address, thisrun_count * 4, buffer);
+			if (retval != ERROR_OK)
+				break;
+
+			buf_set_u32(reg_params[0].value, 0, 32, source->address);
+			buf_set_u32(reg_params[1].value, 0, 32, address);
+			buf_set_u32(reg_params[2].value, 0, 32, thisrun_count);
+
+			retval = target_run_algorithm(target, 0, NULL, 3, reg_params,
+					write_algorithm->address, 0, 100000, &armv7m_info);
+			if (retval != ERROR_OK) {
+				LOG_ERROR("Error executing NuMicro Flash programming algorithm");
+				retval = ERROR_FLASH_OPERATION_FAILED;
+				break;
+			}
+
+			buffer  += thisrun_count * 4;
+			address += thisrun_count * 4;
+			count   -= thisrun_count;
+			LOG_INFO("Have written %d%%", (totalCount - count) * 100 / totalCount);
+		}
+
+		target_free_working_area(target, source);
+		target_free_working_area(target, write_algorithm);
+
+		destroy_reg_param(&reg_params[0]);
+		destroy_reg_param(&reg_params[1]);
+		destroy_reg_param(&reg_params[2]);
 	}
-
-	target_free_working_area(target, source);
-	target_free_working_area(target, write_algorithm);
-
-	destroy_reg_param(&reg_params[0]);
-	destroy_reg_param(&reg_params[1]);
-	destroy_reg_param(&reg_params[2]);
 
 	return retval;
 }

@@ -26,6 +26,9 @@
 
 #define NULINK_READ_TIMEOUT  LIBUSB_TIMEOUT_MS
 
+#define NULINK_INTERFACE_NUM  0
+#define NULINK2_INTERFACE_NUM 3
+
 #define NULINK_HID_MAX_SIZE   (64)
 #define NULINK2_HID_MAX_SIZE   (1024)
 #define V6M_MAX_COMMAND_LENGTH (NULINK_HID_MAX_SIZE - 2)
@@ -49,11 +52,14 @@ struct nulink_usb_handle_s {
 	uint8_t usbcmdidx;
 	uint8_t cmdidx;
 	uint8_t cmdsize;
+	uint8_t interface_num;
 	uint8_t cmdbuf[NULINK2_HID_MAX_SIZE + 1];
 	uint8_t tempbuf[NULINK2_HID_MAX_SIZE];
 	uint8_t databuf[NULINK2_HID_MAX_SIZE];
 	uint32_t max_mem_packet;
 	uint16_t hardware_config; /* bit 0: 1:Nu-Link-Pro, 0:Nu-Link */
+	uint32_t io_voltage;
+	uint32_t chip_type;
 
 	int (*xfer)(void *handle, uint8_t *buf, int size);
 	void (*init_buffer)(void *handle, uint32_t size);
@@ -984,10 +990,10 @@ static int nulink_speed(void *handle, int khz, bool query)
 		h_u32_to_le(h->cmdbuf + h->cmdidx, max_ice_clock);
 		h->cmdidx += 4;
 		/* chip type: NUC_CHIP_TYPE_GENERAL_V6M */
-		h_u32_to_le(h->cmdbuf + h->cmdidx, 0);
+		h_u32_to_le(h->cmdbuf + h->cmdidx, h->chip_type);
 		h->cmdidx += 4;
 		/* IO voltage */
-		h_u32_to_le(h->cmdbuf + h->cmdidx, 5000);
+		h_u32_to_le(h->cmdbuf + h->cmdidx, h->io_voltage);
 		h->cmdidx += 4;
 		/* If supply voltage to target or not */
 		h_u32_to_le(h->cmdbuf + h->cmdidx, 0);
@@ -1127,35 +1133,74 @@ static int nulink_usb_open(struct hl_interface_param_s *param, void **fd)
 	case NULINK2_USB_PID10:
 	case NULINK2_USB_PID11:
 		h->hardware_config = HARDWARE_CONFIG_NULINK2;
-		h->max_packet_size = NULINK2_HID_MAX_SIZE;
 		h->init_buffer = nulink2_usb_init_buffer;
 		h->xfer = nulink2_usb_xfer;
+		h->interface_num = NULINK2_INTERFACE_NUM;
+		h->max_packet_size = NULINK2_HID_MAX_SIZE;
 		break;
 	default:
 		h->hardware_config = 0;
-		h->max_packet_size = NULINK_HID_MAX_SIZE;
 		h->init_buffer = nulink1_usb_init_buffer;
 		h->xfer = nulink1_usb_xfer;
+		h->interface_num = NULINK_INTERFACE_NUM;
+		h->max_packet_size = NULINK_HID_MAX_SIZE;
 		break;
 	}
 
 	/* get the device version */
-	h->cmdsize = 4 * 5;
+	h->cmdsize = 4 * 6;
 	int err = nulink_usb_version(h);
 	if (err != ERROR_OK) {
 		LOG_DEBUG("nulink_usb_version failed with cmdSize(4 * 5)");
-		h->cmdsize = 4 * 6;
+		h->cmdsize = 4 * 5;
 		err = nulink_usb_version(h);
 		if (err != ERROR_OK)
 			LOG_DEBUG("nulink_usb_version failed with cmdSize(4 * 6)");
 	}
 
+	if ((strcmp(param->device_desc, "Nu-Link-Pro output voltage 1800") == 0) ||
+		(strcmp(param->device_desc, "Nu-Link2-Pro output voltage 1800") == 0)) {
+		h->io_voltage = 1800;
+	}
+	else if ((strcmp(param->device_desc, "Nu-Link-Pro output voltage 2500") == 0) ||
+			 (strcmp(param->device_desc, "Nu-Link2-Pro output voltage 2500") == 0)) {
+		h->io_voltage = 2500;
+	}
+	else if ((strcmp(param->device_desc, "Nu-Link-Pro output voltage 5000") == 0) ||
+			 (strcmp(param->device_desc, "Nu-Link2-Pro output voltage 5000") == 0)) {
+		h->io_voltage = 5000;
+	}
+	else {
+		h->io_voltage = 3300;
+	}
+
 	/* SWD clock rate : 1MHz */
-	nulink_speed(h, 1000, false);
+	/* chip type: NUC_CHIP_TYPE_GENERAL_V6M */
+	h->chip_type = 0;
+	nulink_speed(h, param->initial_interface_speed, false);
 
 	/* get cpuid, so we can determine the max page size
 	 * start with a safe default */
 	h->max_mem_packet = (1 << 10);
+
+	uint8_t buffer[4];
+	err = nulink_usb_read_mem32(h, CPUID, 4, buffer);
+	if (err == ERROR_OK) {
+		uint32_t cpuid = le_to_h_u32(buffer);
+		int i;
+
+		if (((cpuid >> 4) & 0xfff) == 0xD20 || ((cpuid >> 4) & 0xfff) == 0xD21) {
+			i = 23;
+		}
+		else {
+			i = (cpuid >> 4) & 0xf;
+		}
+
+		if (i == 4 || i == 3 || i == 23) {
+			/* Cortex-M3/M4/M23 has 4096 bytes autoincrement range */
+			h->max_mem_packet = (1 << 12);
+		}
+	}
 
 	LOG_DEBUG("nulink_usb_open: we manually perform nulink_usb_reset");
 	nulink_usb_reset(h);
